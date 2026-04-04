@@ -78,4 +78,27 @@ router.get("/thumbnails", async (req, res) => {
     }
 });
 
+const { GetObjectCommand } = require("@aws-sdk/client-s3");
+
+router.get("/download", async (req, res) => {
+    try {
+        const key = req.query.key;
+
+        const command = new GetObjectCommand({
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: key
+        });
+
+        const data = await s3.send(command);
+
+        res.setHeader("Content-Disposition", `attachment; filename="${key.split('/').pop()}"`);
+        res.setHeader("Content-Type", data.ContentType);
+
+        data.Body.pipe(res);
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
