@@ -28,7 +28,7 @@ router.post("/upload", upload.array("images", 10), async (req, res) => {
             }));
 
             // thumbnail
-            const thumb = await sharp(file.buffer).resize(200, 200).toBuffer();
+            const thumb = await sharp(file.buffer).resize(600).toBuffer();
 
             await s3.send(new PutObjectCommand({
                 Bucket: process.env.AWS_BUCKET_NAME,
