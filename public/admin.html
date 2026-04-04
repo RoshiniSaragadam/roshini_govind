@@ -107,21 +107,11 @@
             color: #888;
         }
 
-        .preview {
-            margin-top: 10px;
-            text-align: center;
-        }
-
-        .preview img {
-            width: 100px;
-            border-radius: 8px;
-        }
-
         .upload-box {
             background: white;
             padding: 25px;
             border-radius: 16px;
-            width: 340px;
+            width: 100%;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
             transition: 0.3s;
         }
@@ -172,6 +162,36 @@
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
         }
 
+        .preview {
+            display: flex;
+            gap: 12px;
+            overflow-x: auto;
+            padding: 10px 5px;
+            margin-top: 15px;
+        }
+
+        .preview::-webkit-scrollbar {
+            height: 6px;
+        }
+
+        .preview::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 10px;
+        }
+
+        .preview-item {
+            position: relative;
+            min-width: 100px;
+        }
+
+        .preview-item img {
+            width: 100px;
+            height: 120px;
+            object-fit: cover;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
         .upload-btn {
             margin-top: 15px;
             width: 100%;
@@ -196,6 +216,39 @@
             text-align: center;
             color: #666;
         }
+
+        .delete-btn {
+            position: absolute;
+            top: -16px;
+            right: -6px;
+            background: #ef4444;
+            border: none;
+            color: white;
+            font-size: 12px;
+            width: 22px !important;
+            height: 22px !important;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+            transition: 0.2s;
+
+            display: flex;
+            /* ✅ important */
+            align-items: center;
+            /* ✅ vertical center */
+            justify-content: center;
+            /* ✅ horizontal center */
+
+            font-size: 12px;
+            line-height: 1;
+            font-size: 14px;
+            /* slightly bigger */
+            font-weight: bold;
+        }
+
+        .delete-btn:hover {
+            background: #dc2626;
+        }
     </style>
 </head>
 
@@ -212,7 +265,7 @@
             <div class="upload-title">📤 Upload Image</div>
 
             <label class="file-input">
-                <input type="file" id="fileInput" accept="image/*">
+                <input type="file" id="fileInput" accept="image/*" multiple>
                 <div class="file-label">
                     Click or drag image here 📂
                 </div>
@@ -231,41 +284,84 @@
         <div id="gallery" class="gallery"></div>
         <div id="empty" class="empty"></div>
 
+        <div style="text-align:center; margin-top:20px;">
+            <button onclick="prevPage()">⬅ Prev</button>
+            <span id="pageNumber"></span>
+            <button onclick="nextPage()">Next ➡</button>
+        </div>
+
     </div>
 
     <script>
         const API = window.location.origin + "/api";
 
-        // 📸 Preview before upload
+        let selectedFiles = [];
+        let isUploading = false;
+
         document.getElementById("fileInput").addEventListener("change", function () {
-            const file = this.files[0];
-            const preview = document.getElementById("preview");
+            const files = Array.from(this.files);
+            const status = document.getElementById("status");
 
-            if (!file) return;
+            status.innerText = "";
 
-            if (!file.type.startsWith("image/")) {
-                alert("Only images allowed!");
-                this.value = "";
-                return;
-            }
+            // append instead of replace (optional)
+            selectedFiles = [...selectedFiles, ...files].filter(
+                (file, index, self) =>
+                    index === self.findIndex(f => f.name === file.name)
+            );
 
-            preview.innerHTML = `<img src="${URL.createObjectURL(file)}" />`;
+            renderPreview();
         });
+
+        function renderPreview() {
+            const preview = document.getElementById("preview");
+            preview.innerHTML = "";
+
+            selectedFiles.forEach((file, index) => {
+                if (!file.type.startsWith("image/")) return;
+
+                const div = document.createElement("div");
+                div.className = "preview-item";
+                div.id = `img-${index}`;
+
+                div.innerHTML = `
+            <img src="${URL.createObjectURL(file)}" />
+            <button class="delete-btn" onclick="removeFile(${index})" ${isUploading ? "disabled" : ""}>×</button>
+        `;
+
+                preview.appendChild(div);
+            });
+        }
+
+        // ❌ remove before upload
+        function removeFile(index) {
+            if (isUploading) return;
+
+            selectedFiles.splice(index, 1);
+
+            // renderPreview();  // ✅ re-render correctly
+
+            document.getElementById(`img-${index}`).style.display = "none";
+
+
+        }
 
         // 📤 Upload
         async function upload() {
-            const fileInput = document.getElementById("fileInput");
-            const file = fileInput.files[0];
             const status = document.getElementById("status");
 
-            if (!file) {
-                alert("Please select an image");
+            if (!selectedFiles.length) {
+                alert("Select at least one image");
                 return;
             }
 
             const formData = new FormData();
-            formData.append("image", file);
 
+            selectedFiles.forEach(file => {
+                formData.append("images", file); // multiple files
+            });
+
+            isUploading = true;
             status.innerText = "Uploading... ⏳";
 
             try {
@@ -275,24 +371,35 @@
                 });
 
                 status.innerText = "Uploaded successfully ✅";
-                fileInput.value = "";
+
+                selectedFiles = [];
                 document.getElementById("preview").innerHTML = "";
+                // document.getElementById("fileInput").value = "";
+
+                isUploading = false;
 
                 loadImages();
 
             } catch (err) {
                 status.innerText = "Upload failed ❌";
+                isUploading = false;
             }
         }
 
         // 📥 Load thumbnails
+        let page = 1;
+        const limit = 6;
+
         async function loadImages() {
             const gallery = document.getElementById("gallery");
             const loader = document.getElementById("loader");
             const empty = document.getElementById("empty");
 
+            loader.style.display = "block";
+
             try {
-                const res = await fetch(`${API}/thumbnails`);
+                // ✅ ONLY ONE API CALL (with pagination)
+                const res = await fetch(`${API}/thumbnails?page=${page}&limit=${limit}`);
                 const data = await res.json();
 
                 gallery.innerHTML = "";
@@ -325,7 +432,6 @@
                 loader.innerText = "Failed to load images ❌";
             }
         }
-
         // 📥 Download original
         function download(url) {
             const a = document.createElement("a");
@@ -335,6 +441,21 @@
             document.body.appendChild(a);
             a.click();
             a.remove();
+        }
+        function nextPage() {
+            page++;
+            updatePage();
+            loadImages();
+        }
+
+        function prevPage() {
+            if (page > 1) page--;
+            updatePage();
+            loadImages();
+        }
+
+        function updatePage() {
+            document.getElementById("pageNumber").innerText = `Page ${page}`;
         }
 
         // initial load
