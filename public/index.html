@@ -97,25 +97,15 @@
     <div class="container">
         <div id="status" class="loader">Loading images...</div>
         <div id="gallery" class="gallery"></div>
-        <div id="modal"
-            style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center;">
-
-            <div style="position:relative;">
-                <img id="modalImg" style="max-width:90vw; max-height:80vh; border-radius:10px;" />
-
-                <button onclick="downloadCurrent()"
-                    style="position:absolute; bottom:-50px; left:50%; transform:translateX(-50%);">
-                    ⬇ Download
-                </button>
-
-                <button onclick="closeModal()" style="position:absolute; top:-10px; right:-10px; background:red;">
-                    ✖
-                </button>
-            </div>
-
-        </div>
         <div id="empty" class="empty"></div>
     </div>
+
+    <div style="text-align:center; margin-top:20px;">
+        <button onclick="prevPage()">⬅ Prev</button>
+        <span id="pageNumber"></span>
+        <button onclick="nextPage()">Next ➡</button>
+    </div>
+
     <script>
         // const API = "http://localhost:5000/api";
         const API = window.location.origin + "/api";
@@ -123,91 +113,49 @@
         // 📥 Load thumbnails
         let page = 1;
         const limit = 10;
-        let isLoading = false;
-        let hasMore = true;
-
-        window.addEventListener("scroll", () => {
-            const scrollTop = window.scrollY;
-            const windowHeight = window.innerHeight;
-            const fullHeight = document.body.scrollHeight;
-
-            // load more when near bottom
-            if (scrollTop + windowHeight >= fullHeight - 100) {
-                loadImages();
-            }
-        });
 
         async function loadImages() {
-            if (isLoading || !hasMore) return;
-
             const gallery = document.getElementById("gallery");
             const loader = document.getElementById("status");
             const empty = document.getElementById("empty");
 
-            isLoading = true;
             loader.style.display = "block";
 
             try {
+                // ✅ ONLY ONE API CALL (with pagination)
                 const res = await fetch(`${API}/thumbnails?page=${page}&limit=${limit}`);
                 const data = await res.json();
 
+                gallery.innerHTML = "";
                 loader.style.display = "none";
 
-                // ❌ no more data
                 if (!data.length) {
-                    hasMore = false;
-
-                    if (page === 1) {
-                        empty.innerText = "No images found 📭";
-                    }
-
+                    empty.innerText = "No images found 📭";
                     return;
                 }
 
                 empty.innerText = "";
 
-                // ✅ append (not replace)
                 data.forEach(item => {
                     const div = document.createElement("div");
                     div.className = "card";
 
                     div.innerHTML = `
-                        <img src="${item.thumbnailUrl}" onclick="openModal('${item.originalUrl}')" title="Click for preview" />
-                        <div class="card-body">
-                            <button onclick="download('${item.originalUrl}')">
-                                ⬇ Download
-                            </button>
-                        </div>
-                    `;
+                <img src="${item.thumbnailUrl}" />
+                <div class="card-body">
+                    <button onclick="download('${item.originalUrl}')">
+                        ⬇ Download
+                    </button>
+                </div>
+            `;
 
                     gallery.appendChild(div);
                 });
 
-                page++; // next page
-
             } catch (err) {
                 loader.innerText = "Failed to load images ❌";
             }
-
-            isLoading = false;
         }
-
-        let currentImage = "";
-
-        function openModal(url) {
-            document.getElementById("modal").style.display = "flex";
-            document.getElementById("modalImg").src = url;
-            currentImage = url;
-        }
-
-        function closeModal() {
-            document.getElementById("modal").style.display = "none";
-        }
-
-        function downloadCurrent() {
-            download(currentImage);
-        }
-
         // 📥 Download original
 
         function download(originalUrl) {

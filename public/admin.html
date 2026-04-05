@@ -351,39 +351,55 @@
             const status = document.getElementById("status");
 
             if (!selectedFiles.length) {
-                alert("Select at least one image");
+                alert("Select images first");
                 return;
             }
-
-            const formData = new FormData();
-
-            selectedFiles.forEach(file => {
-                formData.append("images", file); // multiple files
-            });
 
             isUploading = true;
             status.innerText = "Uploading... ⏳";
 
             try {
-                await fetch(`${API}/upload`, {
-                    method: "POST",
-                    body: formData
-                });
+                await Promise.all(selectedFiles.map(async (file) => {
+
+                    const res = await fetch(`${API}/get-upload-url`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            fileName: file.name,
+                            fileType: file.type
+                        })
+                    });
+
+                    const { uploadUrl, key } = await res.json();
+
+                    await fetch(uploadUrl, {
+                        method: "PUT",
+                        body: file,
+                        // headers: { "Content-Type": file.type }
+                    });
+
+                    await fetch(`${API}/process-image`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ key })
+                    });
+
+                }));
 
                 status.innerText = "Uploaded successfully ✅";
 
+                // ✅ reset
                 selectedFiles = [];
-                document.getElementById("preview").innerHTML = "";
-                // document.getElementById("fileInput").value = "";
-
-                isUploading = false;
+                renderPreview();
+                document.getElementById("fileInput").value = "";
 
                 loadImages();
 
             } catch (err) {
                 status.innerText = "Upload failed ❌";
-                isUploading = false;
             }
+
+            isUploading = false;
         }
 
         // 📥 Load thumbnails

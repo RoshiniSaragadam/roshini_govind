@@ -1,6 +1,7 @@
 const express = require("express");
 const multer = require("multer");
-const { PutObjectCommand, ListObjectsV2Command, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const sharp = require("sharp");
 const s3 = require("../config/s3");
@@ -11,35 +12,60 @@ const upload = multer({
     // limits: { fileSize: 5 * 1024 * 1024 }
 });
 
-router.post("/upload", upload.array("images", 10), async (req, res) => {
+router.post("/process-image", async (req, res) => {
     try {
-        const files = req.files;
+        const { key } = req.body;
 
-        for (const file of files) {
-            const fileName = `${Date.now()}-${file.originalname}`;
+        // 1. Get uploaded file
+        const data = await s3.send(new GetObjectCommand({
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: key
+        }));
 
-            // original
-            await s3.send(new PutObjectCommand({
-                Bucket: process.env.AWS_BUCKET_NAME,
-                Key: `original/${fileName}`,
-                Body: file.buffer,
-                ContentType: file.mimetype,
-                ACL: "public-read"
-            }));
-
-            // thumbnail
-            const thumb = await sharp(file.buffer).resize(600).toBuffer();
-
-            await s3.send(new PutObjectCommand({
-                Bucket: process.env.AWS_BUCKET_NAME,
-                Key: `thumbnails/${fileName}`,
-                Body: thumb,
-                ContentType: file.mimetype,
-                ACL: "public-read"
-            }));
+        const chunks = [];
+        for await (const chunk of data.Body) {
+            chunks.push(chunk);
         }
+        const buffer = Buffer.concat(chunks);
 
-        res.json({ message: "All files uploaded" });
+        const fileName = key.split("/").pop().split(".")[0];
+
+        // 🟡 OPTIMIZED (MAIN IMAGE)
+        const optimized = await sharp(buffer)
+            .webp({ quality: 80 })
+            .toBuffer();
+
+        // 🟢 THUMBNAIL
+        const thumbnail = await sharp(buffer)
+            .resize(200)
+            .webp({ quality: 60 })
+            .toBuffer();
+
+        // upload optimized
+        await s3.send(new PutObjectCommand({
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: `optimized/${fileName}.webp`,
+            Body: optimized,
+            ContentType: "image/webp",
+            ACL: "public-read"
+        }));
+
+        // upload thumbnail
+        await s3.send(new PutObjectCommand({
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: `thumbnails/${fileName}.webp`,
+            Body: thumbnail,
+            ContentType: "image/webp",
+            ACL: "public-read"
+        }));
+
+        // 🧹 DELETE original upload (IMPORTANT)
+        await s3.send(new DeleteObjectCommand({
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: key
+        }));
+
+        res.json({ message: "Processed successfully" });
 
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -63,11 +89,11 @@ router.get("/thumbnails", async (req, res) => {
         const paginated = filtered.slice(start, start + limit);
 
         const images = paginated.map(item => {
-            const fileName = item.Key.replace("thumbnails/", "");
+            const fileName = item.Key.replace("thumbnails/", "").replace(".webp", "");
 
             return {
                 thumbnailUrl: `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${item.Key}`,
-                originalUrl: `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/original/${fileName}`
+                originalUrl: `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/optimized/${fileName}.webp`
             };
         });
 
@@ -93,6 +119,26 @@ router.get("/download", async (req, res) => {
         res.setHeader("Content-Type", data.ContentType);
 
         data.Body.pipe(res);
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.post("/get-upload-url", async (req, res) => {
+    try {
+        const { fileName } = req.body;
+
+        const key = `uploads/${Date.now()}-${fileName}`;
+
+        const command = new PutObjectCommand({
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: key
+        });
+
+        const url = await getSignedUrl(s3, command, { expiresIn: 60 });
+
+        res.json({ uploadUrl: url, key });
 
     } catch (err) {
         res.status(500).json({ error: err.message });
